@@ -1,0 +1,8 @@
+# Calibration / capture assets
+/camera/
+/tags/
+/undistorted/
+/part1_files/
+
+# Generated dataset archive
+/nerf_dataset.npz
