@@ -48,7 +48,18 @@
 </header>
 <aside aria-label="Table of contents" class="toc d-none d-lg-block">
 <div class="fw-bold text-uppercase small text-muted mb-2">Contents</div>
-<nav class="nav flex-column" id="toc-nav"><a class="nav-link" href="#overview">Overview</a><a class="nav-link" href="#part0">Part 0 – Data Capture</a><a class="nav-link" href="#part1">Part 1 – 2D Neural Field</a><a class="nav-link" href="#part21">Part 2.1 – Rays</a><a class="nav-link" href="#part22">Part 2.2 – Sampling</a><a class="nav-link" href="#part23">Part 2.3 – Dataloader</a><a class="nav-link" href="#part24">Part 2.4 – NeRF MLP</a><a class="nav-link" href="#part25">Part 2.5 – Volume Rendering</a><a class="nav-link" href="#part2">Part 2.6 – Custom NeRF</a></nav>
+<nav class="nav flex-column" id="toc-nav">
+  <a class="nav-link" href="#overview">Overview</a>
+  <a class="nav-link" href="#part0">Part 0 – Data Capture</a>
+  <a class="nav-link" href="#part1">Part 1 – 2D Neural Field</a>
+  <a class="nav-link" href="#part2">Part 2 – NeRFs</a>
+  <a class="nav-link ms-3 small" href="#part21">2.1 Rays</a>
+  <a class="nav-link ms-3 small" href="#part22">2.2 Sampling</a>
+  <a class="nav-link ms-3 small" href="#part23">2.3 Dataloader</a>
+  <a class="nav-link ms-3 small" href="#part24">2.4 NeRF MLP</a>
+  <a class="nav-link ms-3 small" href="#part25">2.5 Volume Rendering</a>
+  <a class="nav-link ms-3 small" href="#part26">2.6 Custom NeRF</a>
+</nav>
 </aside>
 <main class="pb-5">
 <section class="container mb-5" id="overview">
@@ -202,14 +213,14 @@
 </div>
 </section>
 <section class="container mb-5" id="part2">
-<div class="section-title">Part 2.6 – Custom Neural Radiance Field</div>
-<div class="panel mb-4">
-<div class="hd">Part 2.6 Overview</div>
+<div class="section-title">Part 2 – Neural Radiance Fields</div>
+<div class="panel mb-4" id="part20">
+<div class="hd">Overview</div>
 <div class="bd">
-<p>Using the undistorted dataset from Part 0, I had trained a NeRF on my Lego captures. The <code>RaysData</code> class precomputes 1.2M rays (origins, directions, RGB) so training simply samples 2048 rays per step, stratifies 96 samples along each, runs them through the NeRF MLP (8 layers, width 256, PE L<sub>xyz</sub>=10/L<sub>dir</sub>=4), and volume-renders with a white background blend. Commands use <code>--resume</code> because the assignment environment kills processes after ~120 s, so I chained multiple runs until I reached 900 iterations. Near/far bounds are inferred automatically from the camera translations (distance_min − 0.15, distance_max + 0.05) to avoid clipping. Intermediate renders and the loss curve (log scale) show how the model sharpens over time.</p>
+<p>I turned both datasets—<code>lego_200x200.npz</code> for benchmarking and my Part 0 capture for the final deliverable—into NeRF-ready training jobs. The pipeline flows through five subparts: create rays from camera intrinsics/extrinsics, sample those rays in 3D, bundle everything in a dataloader, pass the samples through the NeRF MLP, and volume-render images to compare against ground truth. The Lego run (800 iterations) provided ray visualizations, training progression renders, PSNR curves, and a spherical video from the provided test cameras. After validating that stack, I switched to my own dataset for Part 2.6, keeping the exact same code path but lowering near/far bounds and enabling a white background blend for faster convergence.</p>
 </div>
 </div>
-<div class="panel mb-4">
+<div class="panel mb-4" id="part21">
 <div class="hd">Part 2.1 – Rays from Cameras</div>
 <div class="bd">
 <p><strong>transform(c2w, x_c):</strong> I implemented a batched version in PyTorch that multiplies by the rotation and adds translation. I validate it with an assertion <code>x == transform(inv(c2w), transform(c2w, x))</code> within 1e‑5.</p>
@@ -217,14 +228,14 @@
 <p><strong>pixel_to_ray(K, c2w, uv):</strong> I converted each pixel to camera coordinates at s=1, transform to world space, subtract the camera origin (translation from c2w) and normalize to get ray directions. This function supports feeding tens of thousands of UVs per call.</p>
 </div>
 </div>
-<div class="panel mb-4">
+<div class="panel mb-4" id="part22">
 <div class="hd">Part 2.2 – Sampling Strategy</div>
 <div class="bd">
 <p><strong>Rays from images:</strong> I flattened every pixel from every training image (global sampling). My <code>RaysData</code> precomputes the flattened UVs, colors, and c2w references so sampling N rays is just indexing into giant tensors. Pixel centers add 0.5 offset to avoid corner bias.</p>
 <p><strong>Points along rays:</strong> For each batch I sample <code>n_samples</code> stratified depths between [near, far]. In training I perturb each bin with uniform noise to cover the entire segment over time; evaluation uses deterministic midpoints. This yields tensors of shape [num_rays, n_samples, 3] ready for NeRF.</p>
 </div>
 </div>
-<div class="panel mb-4">
+<div class="panel mb-4" id="part23">
 <div class="hd">Part 2.3 – Dataloader + Visualization</div>
 <div class="bd">
 <p><strong>Dataloader:</strong> Putting 2.1 and 2.2 together, <code>dataset.sample_rays(N)</code> returns <code>rays_o</code>, <code>rays_d</code>, <code>pixels</code>, and UVs for training. Validation uses all rays of a camera to render full images.</p>
@@ -294,11 +305,17 @@
 <img alt="Lego spherical gif" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/lego_spherical.gif"/>
 </div>
 </div>
+<div class="panel mb-4" id="part26">
+<div class="hd">Part 2.6 – Custom Neural Radiance Field</div>
+<div class="bd">
+<p>With the same pipeline debugged on Lego, I re-ran everything on my Part 0 dataset (camping lantern + ArUco). <code>RaysData</code> precomputes ~1.2M rays (origins, directions, RGB) so training simply samples 2048 rays per step, stratifies 96 samples along each, runs them through the NeRF MLP (8 layers, width 256, PE L<sub>xyz</sub>=10/L<sub>dir</sub>=4), and volume-renders with a white background blend. Commands use <code>--resume</code> because the environment can time out after ~120 s, so I chained multiple runs until I reached 900 iterations. Near/far bounds were inferred automatically from the camera translations (distance_min − 0.15, distance_max + 0.05) to avoid clipping. The deliverables below show loss, intermediate renders, and the looping orbit GIF.</p>
+</div>
+</div>
 <div class="panel mb-4">
-<div class="hd">Implementation Notes</div>
+<div class="hd">Custom Implementation Notes</div>
 <div class="bd">
 <ul>
-<li>Dataset: my undistorted Lego captures (25 train, 3 val, 3 test). All intrinsics and poses come from Part 0.</li>
+<li>Dataset: my undistorted custom captures (25 train, 3 val, 3 test). All intrinsics and poses come from Part 0.</li>
 <li>Sampling: 96 points per ray during training (jittered), 128 for eval, 160 for final renders. Auto near/far derived from camera translations (near ≈ distance_min − 0.15, far ≈ distance_max + 0.05).</li>
 <li>Network: 8-layer NeRF MLP (width 256), skip after layer 4, PE with L<sub>xyz</sub>=10, L<sub>dir</sub>=4.</li>
 <li>Optimizer: Adam, lr=5e-4, batch size 2048 rays. Training performed in resumable 120-second chunks until 900 iterations.</li>
@@ -307,13 +324,13 @@
 </div>
 </div>
 <div class="panel mb-4">
-<div class="hd">Training Loss</div>
+<div class="hd">Custom Training Loss</div>
 <div class="bd text-center">
 <img alt="Custom loss curve" class="img-fluid" src="website_stuff/assets/part2/custom_loss_curve.png"/>
 </div>
 </div>
 <div class="panel mb-4">
-<div class="hd">Intermediate Renders</div>
+<div class="hd">Custom Intermediate Renders</div>
 <div class="bd">
 <div class="row g-3 gallery">
 <div class="col-md-4 text-center">
@@ -332,7 +349,7 @@
 </div>
 </div>
 <div class="panel mb-5">
-<div class="hd">Orbit GIF (Novel Views)</div>
+<div class="hd">Custom Orbit GIF (Novel Views)</div>
 <div class="bd text-center">
 <p class="text-muted mb-2">Quick diagnostic orbit (320 px, 64 samples, 30 frames). The GIF is set to loop forever.</p>
 <div class="row justify-content-center">
