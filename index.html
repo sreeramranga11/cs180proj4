@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>CS180 Project 4: Neural Radiance Fields</title>
+<meta content="Project report for CS180 Project 4 – camera calibration, NeRF warmups, and a custom Neural Radiance Field trained on my own capture." name="description"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+<style>
+    :root {
+      --bg:#f7f9fc; --surface:#ffffff; --ink:#111827; --muted:#6b7280;
+      --border:#e2e8f0; --accent:#2563eb; --accent-2:#a855f7;
+      --chip:#eef2ff; --radius:16px; --shadow:0 10px 25px rgba(15,23,42,.09);
+    }
+    html, body { background:var(--bg); color:var(--ink); font-family:'Inter',system-ui; }
+    a { color:var(--accent); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    .site-header { background:rgba(255,255,255,.9); backdrop-filter:blur(10px); }
+    .site-header .navbar-brand { font-weight:800; letter-spacing:.2px; }
+    .panel { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
+    .panel .hd { padding:16px 20px; border-bottom:1px solid var(--border); font-weight:700; }
+    .panel .bd { padding:18px 20px; }
+    .gallery img, .gallery video { border-radius:14px; border:1px solid var(--border); width:100%; height:auto; box-shadow:var(--shadow); }
+    .chip { display:inline-flex; align-items:center; gap:.35rem; padding:.35rem .7rem; border-radius:999px; background:var(--chip); border:1px solid #dbe4ff; font-size:.85rem; color:#374151; }
+    .section-title { font-size:1.75rem; font-weight:700; margin-bottom:1rem; }
+    .toc { position:fixed; top:90px; left:16px; width:240px; max-height:calc(100vh - 110px); overflow:auto; padding:14px; border-radius:14px; background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow); }
+    .toc a { display:block; color:var(--muted); padding:.35rem .25rem; border-radius:8px; font-size:.9rem; }
+    .toc a:hover, .toc a.active { background:rgba(37,99,235,.08); color:var(--ink); }
+    main { padding-left:272px; }
+    @media (max-width:992px) { .toc{display:none;} main{padding-left:0;} }
+    .scroll-progress { position:fixed; top:0; left:0; width:100%; height:3px; z-index:9999; }
+    .scroll-progress__bar { height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent-2)); }
+  </style>
+</head>
+<body data-bs-offset="100" data-bs-spy="scroll" data-bs-target="#toc-nav" tabindex="0">
+<div class="scroll-progress"><div class="scroll-progress__bar" id="scroll-progress-bar"></div></div>
+<header class="site-header border-bottom mb-4">
+<nav class="navbar navbar-expand-lg navbar-light">
+<div class="container">
+<a class="navbar-brand" href="#">CS180 Project 4 – NeRF</a>
+<div class="small text-muted">Sreeram Ranga • Fall 2025</div>
+</div>
+</nav>
+</header>
+<aside aria-label="Table of contents" class="toc d-none d-lg-block">
+<div class="fw-bold text-uppercase small text-muted mb-2">Contents</div>
+<nav class="nav flex-column" id="toc-nav"><a class="nav-link" href="#overview">Overview</a><a class="nav-link" href="#part0">Part 0 – Data Capture</a><a class="nav-link" href="#part1">Part 1 – 2D Neural Field</a><a class="nav-link" href="#part21">Part 2.1 – Rays</a><a class="nav-link" href="#part22">Part 2.2 – Sampling</a><a class="nav-link" href="#part23">Part 2.3 – Dataloader</a><a class="nav-link" href="#part24">Part 2.4 – NeRF MLP</a><a class="nav-link" href="#part25">Part 2.5 – Volume Rendering</a><a class="nav-link" href="#part2">Part 2.6 – Custom NeRF</a></nav>
+</aside>
+<main class="pb-5">
+<section class="container mb-5" id="overview">
+<div class="row">
+<div class="col-lg-9">
+<div class="panel">
+<div class="hd">Project Overview</div>
+<div class="bd">
+<p>I built an end-to-end NeRF pipeline: calibrating with 55 mm ArUco tags, estimating poses for my Lego scene, undistorting/packing the dataset, fitting 2D neural fields (Part 1), and finally training a Neural Radiance Field (Part 2.6) on my own capture.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section class="container mb-5" id="part0">
+<div class="section-title">Part 0 – Data Capture &amp; Preparation</div>
+<div class="panel mb-4">
+<div class="hd">Summary of the workflow</div>
+<div class="bd">
+<p><strong>0.1 Calibration.</strong> I printed the 55 mm 4×4 ArUco sheet and taped it to cardboard so it stayed flat. With an iPhone 16 Pro I captured 39 RAW frames at 3024×4032, sweeping azimuth, elevation, and distance while keeping focal length locked. <code>calibrate_camera.py</code> runs OpenCV’s detector, collects the 3D corners (in meters), rejects frames with no detections, and solves for intrinsics/distortion via <code>cv2.calibrateCamera</code>. The script logs RMS reprojection error and writes <code>camera_calibration.json</code>.</p>
+<p><strong>0.2 Object scan.</strong> For the Lego bulldozer I had placed a single ArUco next to the model on a turntable, captured 32 images at roughly 20 cm from the object covering the full azimuth range and a few elevated shots. I shot everything in manual exposure to avoid color shifts.</p>
+<p><strong>0.3 Poses.</strong> Using <code>estimate_pose.py</code> I load the calibration, detect the tag in each object frame, call <code>cv2.solvePnP</code>, and invert the world-to-camera to get c2w matrices. I visualizedd the rig with Viser to make sure the coordinate handedness was correct; two screenshots are below.</p>
+<p><strong>0.4 Dataset.</strong> I had undistorted every frame with <code>cv2.getOptimalNewCameraMatrix</code> (alpha=0), cropped valid ROIs, updated the principal point, and split into train/val/test (25/3/3). Everything—images, c2ws, intrinsics, principal point, ROI, metadata—lives in <code>nerf_dataset.npz</code>, which Part 2.6 reads directly.</p>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">0.1 Calibration (5 examples)</div>
+<div class="bd">
+<div class="row g-3 gallery">
+<div class="col-6 col-md"><img alt="Calibration sample 1" src="website_stuff/assets/part0/calibration/calib1.jpg"/></div>
+<div class="col-6 col-md"><img alt="Calibration sample 2" src="website_stuff/assets/part0/calibration/calib2.jpg"/></div>
+<div class="col-6 col-md"><img alt="Calibration sample 3" src="website_stuff/assets/part0/calibration/calib3.jpg"/></div>
+<div class="col-6 col-md"><img alt="Calibration sample 4" src="website_stuff/assets/part0/calibration/calib4.jpg"/></div>
+<div class="col-6 col-md"><img alt="Calibration sample 5" src="website_stuff/assets/part0/calibration/calib5.jpg"/></div>
+</div>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">0.2 Object Scan (5 examples)</div>
+<div class="bd">
+<div class="row g-3 gallery">
+<div class="col-6 col-md"><img alt="Object sample 1" src="website_stuff/assets/part0/object/object1.jpg"/></div>
+<div class="col-6 col-md"><img alt="Object sample 2" src="website_stuff/assets/part0/object/object2.jpg"/></div>
+<div class="col-6 col-md"><img alt="Object sample 3" src="website_stuff/assets/part0/object/object3.jpg"/></div>
+<div class="col-6 col-md"><img alt="Object sample 4" src="website_stuff/assets/part0/object/object4.jpg"/></div>
+<div class="col-6 col-md"><img alt="Object sample 5" src="website_stuff/assets/part0/object/object5.jpg"/></div>
+</div>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">0.3 Pose Visualization</div>
+<div class="bd">
+<p>I used Viser to confirm all estimated extrinsics land in a clean circular rig. Two requested screenshots are below.</p>
+<div class="row g-3 gallery">
+<div class="col-md-6"><img alt="Viser screenshot 1" src="website_stuff/assets/part0/viser/viser1.png"/></div>
+<div class="col-md-6"><img alt="Viser screenshot 2" src="website_stuff/assets/part0/viser/viser2.png"/></div>
+</div>
+</div>
+</div>
+<div class="panel mb-5">
+<div class="hd">0.4 Undistortion + Dataset Packaging</div>
+<div class="bd">
+<p>I had undistorted every capture using the calibrated intrinsics, cropped the valid ROI, adjusted the principal point, and stored <code>images_*</code>, <code>c2ws_*</code>, intrinsics, and camera metadata in <code>nerf_dataset.npz</code>. This is the dataset used in Part 2.6.</p>
+</div>
+</div>
+</section>
+<section class="container mb-5" id="part1">
+<div class="section-title">Part 1 – 2D Neural Field Warmup</div>
+<div class="panel mb-4">
+<div class="hd">What I implemented</div>
+<div class="bd">
+<p>I built a coordinate-based MLP that learns any image from scratch. Each pixel coordinate (u,v)∈[0,1]² is positional-encoded (L=10), fed into a 6-layer width-256 ReLU network with a skip connection half-way, and outputs RGB through a Sigmoid. I flattened the target image, sample 10k pixels per SGD step, and train with Adam (lr 1e-2) for 2000 steps while logging PSNR via a render pass. I repeateded this for the staff fox image and my own goat photo, sweeping width and PE frequency to understand their effect. Metrics and renders are stored per experiment in <code>part1_runs/*</code>, which is what the grids/curves below show.</p>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Architecture &amp; Hyperparameters</div>
+<div class="bd">
+<ul>
+<li>Input: normalized (u, v) pixel coords, encoded with L=10 positional encoding (42-dim). Output: RGB in [0,1].</li>
+<li>Network: 6 hidden layers, width 256, ReLU activations, skip-connection after layer 3 by concatenating the PE features again.</li>
+<li>Optimizer: Adam, lr = 1e-2, batch size 10k pixels, 2000 iterations.</li>
+<li>Ray sampling: flatten entire image and sample uniformly; supervision is RGB / 255.</li>
+</ul>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Training Progress – Provided Fox Image</div>
+<div class="bd">
+<div class="row g-3 gallery">
+<div class="col-md-3 text-center">
+<span class="chip"><i></i>Iter 250</span>
+<img alt="Fox iter 250" src="website_stuff/assets/part1/progression/fox/fox_iter_00250.png"/>
+</div>
+<div class="col-md-3 text-center">
+<span class="chip"><i></i>Iter 750</span>
+<img alt="Fox iter 750" src="website_stuff/assets/part1/progression/fox/fox_iter_00750.png"/>
+</div>
+<div class="col-md-3 text-center">
+<span class="chip"><i></i>Iter 1250</span>
+<img alt="Fox iter 1250" src="website_stuff/assets/part1/progression/fox/fox_iter_01250.png"/>
+</div>
+<div class="col-md-3 text-center">
+<span class="chip"><i></i>Iter 2000</span>
+<img alt="Fox iter 2000" src="website_stuff/assets/part1/progression/fox/fox_iter_02000.png"/>
+</div>
+</div>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Training Progress – My Goat Image</div>
+<div class="bd">
+<div class="row g-3 gallery">
+<div class="col-md-3 text-center">
+<span class="chip"><i></i>Iter 250</span>
+<img alt="Goat iter 250" src="website_stuff/assets/part1/progression/goat/goat_iter_00250.png"/>
+</div>
+<div class="col-md-3 text-center">
+<span class="chip"><i></i>Iter 750</span>
+<img alt="Goat iter 750" src="website_stuff/assets/part1/progression/goat/goat_iter_00750.png"/>
+</div>
+<div class="col-md-3 text-center">
+<span class="chip"><i></i>Iter 1250</span>
+<img alt="Goat iter 1250" src="website_stuff/assets/part1/progression/goat/goat_iter_01250.png"/>
+</div>
+<div class="col-md-3 text-center">
+<span class="chip"><i></i>Iter 2000</span>
+<img alt="Goat iter 2000" src="website_stuff/assets/part1/progression/goat/goat_iter_02000.png"/>
+</div>
+</div>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Effect of PE Frequency &amp; Width (2×2 grids)</div>
+<div class="bd">
+<p>The fox and goat grids sweep width {32, 256} × L {2, 10}. Low width + low frequency produces blurry blobs; increasing either sharpens detail, and the combination (256, L=10) matches the reference quality.</p>
+<div class="row g-4 gallery">
+<div class="col-md-6">
+<img alt="Fox grid" src="website_stuff/assets/part1/results/fox_grid.png"/>
+</div>
+<div class="col-md-6">
+<img alt="Goat grid" src="website_stuff/assets/part1/results/goat_grid.png"/>
+</div>
+</div>
+</div>
+</div>
+<div class="panel mb-5">
+<div class="hd">PSNR Curve (Fox)</div>
+<div class="bd text-center">
+<img alt="PSNR curve" class="img-fluid" src="website_stuff/assets/part1/results/fox_psnr_curve.png"/>
+</div>
+</div>
+</section>
+<section class="container mb-5" id="part2">
+<div class="section-title">Part 2.6 – Custom Neural Radiance Field</div>
+<div class="panel mb-4">
+<div class="hd">Part 2.6 Overview</div>
+<div class="bd">
+<p>Using the undistorted dataset from Part 0, I had trained a NeRF on my Lego captures. The <code>RaysData</code> class precomputes 1.2M rays (origins, directions, RGB) so training simply samples 2048 rays per step, stratifies 96 samples along each, runs them through the NeRF MLP (8 layers, width 256, PE L<sub>xyz</sub>=10/L<sub>dir</sub>=4), and volume-renders with a white background blend. Commands use <code>--resume</code> because the assignment environment kills processes after ~120 s, so I chained multiple runs until I reached 900 iterations. Near/far bounds are inferred automatically from the camera translations (distance_min − 0.15, distance_max + 0.05) to avoid clipping. Intermediate renders and the loss curve (log scale) show how the model sharpens over time.</p>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Part 2.1 – Rays from Cameras</div>
+<div class="bd">
+<p><strong>transform(c2w, x_c):</strong> I implemented a batched version in PyTorch that multiplies by the rotation and adds translation. I validate it with an assertion <code>x == transform(inv(c2w), transform(c2w, x))</code> within 1e‑5.</p>
+<p><strong>pixel_to_camera(K, uv, depth):</strong> Given pixel centers (u,v) with 0.5 offset and depth s, I invert the intrinsics to recover camera space (x,y,s). This runs on batches of N×2 coordinates.</p>
+<p><strong>pixel_to_ray(K, c2w, uv):</strong> I converted each pixel to camera coordinates at s=1, transform to world space, subtract the camera origin (translation from c2w) and normalize to get ray directions. This function supports feeding tens of thousands of UVs per call.</p>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Part 2.2 – Sampling Strategy</div>
+<div class="bd">
+<p><strong>Rays from images:</strong> I flattened every pixel from every training image (global sampling). My <code>RaysData</code> precomputes the flattened UVs, colors, and c2w references so sampling N rays is just indexing into giant tensors. Pixel centers add 0.5 offset to avoid corner bias.</p>
+<p><strong>Points along rays:</strong> For each batch I sample <code>n_samples</code> stratified depths between [near, far]. In training I perturb each bin with uniform noise to cover the entire segment over time; evaluation uses deterministic midpoints. This yields tensors of shape [num_rays, n_samples, 3] ready for NeRF.</p>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Part 2.3 – Dataloader + Visualization</div>
+<div class="bd">
+<p><strong>Dataloader:</strong> Putting 2.1 and 2.2 together, <code>dataset.sample_rays(N)</code> returns <code>rays_o</code>, <code>rays_d</code>, <code>pixels</code>, and UVs for training. Validation uses all rays of a camera to render full images.</p>
+<p><strong>Viser overlays:</strong> I replicated the starter code to render camera frustums plus sampled rays. Before training custom NeRF I verified with 100 random rays from a single camera (ensuring directions leave the frustum) and with rays from different regions of the image to confirm UV indexing.</p>
+<div class="text-center mt-3">
+<img alt="Rays and samples" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/rays_samples.png"/>
+<div class="small text-muted mt-2">Visualization of 100 Lego rays (blue) with sampled 3D points (orange).</div>
+</div>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Part 2.4 – NeRF MLP</div>
+<div class="bd">
+<p>The NeRF network is the canonical architecture: PE(xyz,L=10) → 8×(Linear 256 + ReLU), skip after layer 4 by concatenating the encoded xyz again, density head = Linear → ReLU, feature head = Linear 256, color branch concatenates dir PE (L=4) and runs Linear 128 → ReLU → Linear 3 → Sigmoid. Everything is implemented in PyTorch to reuse autograd. I exposed <code>hidden_dim</code>, <code>xyz_freq</code>, <code>dir_freq</code> via CLI so I can sweep configurations if needed.</p>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Part 2.5 – Volume Rendering</div>
+<div class="bd">
+<p>I implemented the discrete volume rendering equation with <code>torch.cumsum</code>: compute alpha = 1 - exp(-sigma·delta), transmittance = exp(-cumsum(sigma·delta) with a prepended zero), weights = transmittance × alpha, and sum weights·rgb to get each ray color. A unit test with the provided random tensors (seed 42) passed to 1e‑4 tolerance. This function also supported blending with a white background by adding (1 - Σweights), which I relied on for both Lego renders and my custom captures.</p>
+<p>After wiring the renderer into the Lego training loop I logged full-resolution renders every 100 iterations, PSNR on the validation split, and a spherical sweep through the provided test cameras. Those assets are collected below.</p>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Lego Training Progression (100 → 800 iters)</div>
+<div class="bd">
+<p>I rendered the same validation camera throughout training to show how the NeRF gradually sharpened geometry and specular highlights. Each card corresponds to a stored checkpoint.</p>
+<div class="row g-3 gallery">
+<div class="col-md-4 text-center">
+<span class="chip"><i></i>Iter 100</span>
+<img alt="Lego iter 100" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/progression/lego_iter_00100.png"/>
+</div>
+<div class="col-md-4 text-center">
+<span class="chip"><i></i>Iter 200</span>
+<img alt="Lego iter 200" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/progression/lego_iter_00200.png"/>
+</div>
+<div class="col-md-4 text-center">
+<span class="chip"><i></i>Iter 300</span>
+<img alt="Lego iter 300" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/progression/lego_iter_00300.png"/>
+</div>
+<div class="col-md-4 text-center">
+<span class="chip"><i></i>Iter 400</span>
+<img alt="Lego iter 400" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/progression/lego_iter_00400.png"/>
+</div>
+<div class="col-md-4 text-center">
+<span class="chip"><i></i>Iter 600</span>
+<img alt="Lego iter 600" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/progression/lego_iter_00600.png"/>
+</div>
+<div class="col-md-4 text-center">
+<span class="chip"><i></i>Iter 800</span>
+<img alt="Lego iter 800" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/progression/lego_iter_00800.png"/>
+</div>
+</div>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Lego Validation PSNR</div>
+<div class="bd text-center">
+<p class="text-muted mb-2">I measured PSNR on all six validation cameras after every evaluation checkpoint. The curve stabilized just under 20 dB given the 800-iteration, low-batch run.</p>
+<img alt="Lego PSNR curve" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/lego_psnr_curve.png"/>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Spherical Render (Provided Test Cameras)</div>
+<div class="bd text-center">
+<p class="text-muted mb-2">I walked through the provided <code>c2ws_test</code> poses to create a looping spherical render. Each frame was rendered at 200×200 with chunked inference so it fits on my laptop GPU budget.</p>
+<img alt="Lego spherical gif" class="img-fluid rounded shadow-sm" src="website_stuff/assets/part2_lego/lego_spherical.gif"/>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Implementation Notes</div>
+<div class="bd">
+<ul>
+<li>Dataset: my undistorted Lego captures (25 train, 3 val, 3 test). All intrinsics and poses come from Part 0.</li>
+<li>Sampling: 96 points per ray during training (jittered), 128 for eval, 160 for final renders. Auto near/far derived from camera translations (near ≈ distance_min − 0.15, far ≈ distance_max + 0.05).</li>
+<li>Network: 8-layer NeRF MLP (width 256), skip after layer 4, PE with L<sub>xyz</sub>=10, L<sub>dir</sub>=4.</li>
+<li>Optimizer: Adam, lr=5e-4, batch size 2048 rays. Training performed in resumable 120-second chunks until 900 iterations.</li>
+<li>Rendering: white background compositing to avoid dim outputs, chunk size 4096 for memory control.</li>
+</ul>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Training Loss</div>
+<div class="bd text-center">
+<img alt="Custom loss curve" class="img-fluid" src="website_stuff/assets/part2/custom_loss_curve.png"/>
+</div>
+</div>
+<div class="panel mb-4">
+<div class="hd">Intermediate Renders</div>
+<div class="bd">
+<div class="row g-3 gallery">
+<div class="col-md-4 text-center">
+<span class="chip"><i></i>Step 300</span>
+<img alt="Step 300 render" src="website_stuff/assets/part2/render_00300.png"/>
+</div>
+<div class="col-md-4 text-center">
+<span class="chip"><i></i>Step 600</span>
+<img alt="Step 600 render" src="website_stuff/assets/part2/render_00600.png"/>
+</div>
+<div class="col-md-4 text-center">
+<span class="chip"><i></i>Step 900</span>
+<img alt="Step 900 render" src="website_stuff/assets/part2/render_00900.png"/>
+</div>
+</div>
+</div>
+</div>
+<div class="panel mb-5">
+<div class="hd">Orbit GIF (Novel Views)</div>
+<div class="bd text-center">
+<p class="text-muted mb-2">Quick diagnostic orbit (320 px, 64 samples, 30 frames). The GIF is set to loop forever.</p>
+<div class="row justify-content-center">
+<div class="col-md-8">
+<img alt="Orbit render" class="img-fluid" src="website_stuff/assets/part2/orbit_quick.gif"/>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+<footer class="py-4 border-top bg-white">
+<div class="container text-center small text-muted">
+      © <span id="year"></span> Sreeram Ranga · Built for GitHub Pages
+    </div>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const bar = document.getElementById('scroll-progress-bar');
+    function updateProgress(){
+      const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+      const doc = document.documentElement;
+      const max = (doc.scrollHeight - window.innerHeight) || 1;
+      bar.style.width = ((scrollY / max) * 100).toFixed(2) + '%';
+    }
+    window.addEventListener('scroll', updateProgress, {passive:true});
+    window.addEventListener('resize', updateProgress);
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('year').textContent = new Date().getFullYear();
+      updateProgress();
+      document.querySelectorAll('#toc-nav .nav-link').forEach(link => {
+        link.addEventListener('click', () => {
+          document.querySelectorAll('#toc-nav .nav-link').forEach(l => l.classList.remove('active'));
+          link.classList.add('active');
+        });
+      });
+    });
+  </script>
+</body>
+</html>

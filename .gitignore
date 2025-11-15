@@ -3,6 +3,10 @@
 /tags/
 /undistorted/
 /part1_files/
+/part1_runs/
+/part2_runs/
+/part2_runs_lego/
 
 # Generated dataset archive
 /nerf_dataset.npz
+/lego_200x200.npz
